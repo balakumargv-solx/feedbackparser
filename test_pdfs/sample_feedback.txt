@@ -1,0 +1,24 @@
+CREW FEEDBACK FORM
+
+Name: John Smith
+Rank: Captain
+Department: Flight Operations
+Date: 2024-10-24
+
+RATINGS (1-5 scale):
+Communication: 4
+Leadership: 5
+Technical Skills: 4
+Teamwork: 5
+Problem Solving: 4
+Safety Awareness: 5
+Adaptability: 3
+Time Management: 4
+Decision Making: 5
+Overall Performance: 4
+
+COMMENTS:
+Excellent performance during the flight operations. Shows strong leadership skills and maintains high safety standards.
+
+FEATURE PREFERENCE:
+Enhanced communication systems would be beneficial for future operations.
