@@ -1,6 +1,7 @@
 # Web UI requirements for crew feedback parser
 Flask>=2.3.0
 Werkzeug>=2.3.0
+Flask-Session>=0.5.0
 
 # Core dependencies (already in requirements.txt)
 requests>=2.31.0

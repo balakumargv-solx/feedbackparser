@@ -1,0 +1,847 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Crew Feedback Parser</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #2c3e50 0%, #34495e 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            font-weight: 300;
+        }
+
+        .header p {
+            font-size: 1.1em;
+            opacity: 0.9;
+        }
+
+        /* API Key Setup Section */
+        .api-setup {
+            padding: 40px;
+            text-align: center;
+        }
+
+        .api-setup h2 {
+            color: #2c3e50;
+            margin-bottom: 20px;
+            font-size: 1.8em;
+        }
+
+        .api-setup p {
+            color: #666;
+            margin-bottom: 30px;
+            line-height: 1.6;
+        }
+
+        .api-input-group {
+            max-width: 500px;
+            margin: 0 auto 30px;
+        }
+
+        .api-input {
+            width: 100%;
+            padding: 15px 20px;
+            border: 2px solid #ddd;
+            border-radius: 25px;
+            font-size: 1.1em;
+            outline: none;
+            transition: all 0.3s ease;
+            margin-bottom: 15px;
+        }
+
+        .api-input:focus {
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+
+        .api-key-info {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 15px;
+            margin: 20px 0;
+            text-align: left;
+        }
+
+        .api-key-info h3 {
+            color: #2c3e50;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+        }
+
+        .api-key-info ul {
+            color: #555;
+            padding-left: 20px;
+        }
+
+        .api-key-info li {
+            margin-bottom: 8px;
+            line-height: 1.5;
+        }
+
+        .security-note {
+            background: #e8f5e8;
+            border: 1px solid #4caf50;
+            padding: 15px;
+            border-radius: 10px;
+            margin: 20px 0;
+            color: #2e7d32;
+        }
+
+        .security-note strong {
+            color: #1b5e20;
+        }
+
+        /* Main Content (hidden initially) */
+        .main-content {
+            padding: 40px;
+            display: none;
+        }
+
+        .upload-area {
+            border: 3px dashed #ddd;
+            border-radius: 15px;
+            padding: 60px 20px;
+            text-align: center;
+            background: #fafafa;
+            transition: all 0.3s ease;
+            cursor: pointer;
+            margin-bottom: 30px;
+        }
+
+        .upload-area:hover {
+            border-color: #667eea;
+            background: #f0f4ff;
+        }
+
+        .upload-area.dragover {
+            border-color: #667eea;
+            background: #e8f2ff;
+            transform: scale(1.02);
+        }
+
+        .upload-icon {
+            font-size: 4em;
+            color: #667eea;
+            margin-bottom: 20px;
+        }
+
+        .upload-text {
+            font-size: 1.3em;
+            color: #555;
+            margin-bottom: 15px;
+        }
+
+        .upload-subtext {
+            color: #888;
+            font-size: 0.9em;
+        }
+
+        .file-input {
+            display: none;
+        }
+
+        .btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            border-radius: 25px;
+            font-size: 1.1em;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            margin: 10px;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(0,0,0,0.2);
+        }
+
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .btn-success {
+            background: linear-gradient(135deg, #27ae60 0%, #2ecc71 100%);
+        }
+
+        .btn-danger {
+            background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);
+        }
+
+        .file-list {
+            margin: 20px 0;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 10px;
+            display: none;
+        }
+
+        .file-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px;
+            background: white;
+            margin: 5px 0;
+            border-radius: 8px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+
+        .file-name {
+            font-weight: 500;
+            color: #333;
+        }
+
+        .file-size {
+            color: #666;
+            font-size: 0.9em;
+        }
+
+        .remove-file {
+            background: #e74c3c;
+            color: white;
+            border: none;
+            padding: 5px 10px;
+            border-radius: 15px;
+            cursor: pointer;
+            font-size: 0.8em;
+        }
+
+        .progress-container {
+            margin: 20px 0;
+            display: none;
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 20px;
+            background: #f0f0f0;
+            border-radius: 10px;
+            overflow: hidden;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            width: 0%;
+            transition: width 0.3s ease;
+        }
+
+        .status-message {
+            margin: 20px 0;
+            padding: 15px;
+            border-radius: 10px;
+            display: none;
+        }
+
+        .status-success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
+        .status-error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            margin: 20px 0;
+        }
+
+        .stat-card {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            text-align: center;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+        }
+
+        .stat-number {
+            font-size: 2em;
+            font-weight: bold;
+            color: #667eea;
+        }
+
+        .stat-label {
+            color: #666;
+            font-size: 0.9em;
+            margin-top: 5px;
+        }
+
+        .download-section {
+            text-align: center;
+            margin: 30px 0;
+            display: none;
+        }
+
+        .download-btn {
+            background: linear-gradient(135deg, #27ae60 0%, #2ecc71 100%);
+            font-size: 1.2em;
+            padding: 20px 40px;
+        }
+
+        .footer {
+            background: #f8f9fa;
+            padding: 20px;
+            text-align: center;
+            color: #666;
+            font-size: 0.9em;
+        }
+
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #667eea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .supported-formats {
+            background: #e8f4fd;
+            padding: 15px;
+            border-radius: 10px;
+            margin: 20px 0;
+            text-align: center;
+        }
+
+        .format-tag {
+            display: inline-block;
+            background: #667eea;
+            color: white;
+            padding: 5px 10px;
+            border-radius: 15px;
+            margin: 3px;
+            font-size: 0.8em;
+        }
+
+        .api-status {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: #f8f9fa;
+            padding: 15px 20px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+        }
+
+        .api-status.connected {
+            background: #e8f5e8;
+            border: 1px solid #4caf50;
+        }
+
+        .api-indicator {
+            display: flex;
+            align-items: center;
+            color: #666;
+        }
+
+        .api-indicator.connected {
+            color: #2e7d32;
+        }
+
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #ccc;
+            margin-right: 10px;
+        }
+
+        .status-dot.connected {
+            background: #4caf50;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🚢 Crew Feedback Parser</h1>
+            <p>Upload your crew feedback forms and get structured Excel results</p>
+        </div>
+
+        <!-- API Key Setup Section -->
+        <div class="api-setup" id="apiSetup">
+            <h2>🔐 Setup Required</h2>
+            <p>Please enter your OpenAI API key to access the feedback parser. Your key is stored securely in your browser session and never saved on our servers.</p>
+            
+            <div class="api-input-group">
+                <input type="password" id="apiKeyInput" class="api-input" placeholder="Enter your OpenAI API key (sk-...)" maxlength="200">
+                <button class="btn btn-success" onclick="validateApiKey()">
+                    <span id="validateBtnText">Connect & Validate</span>
+                    <span id="validateSpinner" class="loading" style="display: none;"></span>
+                </button>
+            </div>
+
+            <div class="api-key-info">
+                <h3>🔑 How to get your OpenAI API Key:</h3>
+                <ul>
+                    <li>Go to <strong>platform.openai.com</strong></li>
+                    <li>Sign in to your OpenAI account</li>
+                    <li>Navigate to <strong>API Keys</strong> section</li>
+                    <li>Click <strong>"Create new secret key"</strong></li>
+                    <li>Copy the key (starts with "sk-")</li>
+                    <li>Paste it in the field above</li>
+                </ul>
+            </div>
+
+            <div class="security-note">
+                <strong>🛡️ Security Notice:</strong> Your API key is only stored in your browser session and is transmitted securely. We never save or log your API key on our servers.
+            </div>
+        </div>
+
+        <!-- Main Content (shown after API key validation) -->
+        <div class="main-content" id="mainContent">
+            <div class="api-status connected" id="apiStatus">
+                <div class="api-indicator connected">
+                    <div class="status-dot connected"></div>
+                    <span>OpenAI API Connected</span>
+                </div>
+                <button class="btn btn-danger" onclick="disconnectApi()" style="padding: 8px 15px; font-size: 0.9em;">Disconnect</button>
+            </div>
+
+            <div class="upload-area" id="uploadArea">
+                <div class="upload-icon">📁</div>
+                <div class="upload-text">Drag & Drop your files here</div>
+                <div class="upload-subtext">or click to browse files</div>
+                <input type="file" id="fileInput" class="file-input" multiple accept=".pdf,.png,.jpg,.jpeg,.tiff">
+            </div>
+
+            <div class="supported-formats">
+                <strong>Supported formats:</strong>
+                <span class="format-tag">PDF</span>
+                <span class="format-tag">PNG</span>
+                <span class="format-tag">JPG</span>
+                <span class="format-tag">JPEG</span>
+                <span class="format-tag">TIFF</span>
+                <br><br>
+                <small>Maximum file size: 50MB per file</small>
+            </div>
+
+            <div class="file-list" id="fileList">
+                <h3>Selected Files:</h3>
+                <div id="fileItems"></div>
+            </div>
+
+            <div style="text-align: center;">
+                <button class="btn" id="uploadBtn" onclick="uploadFiles()" disabled>
+                    <span id="uploadBtnText">Select Files First</span>
+                    <span id="uploadSpinner" class="loading" style="display: none;"></span>
+                </button>
+                <button class="btn" onclick="clearFiles()">Clear All</button>
+            </div>
+
+            <div class="progress-container" id="progressContainer">
+                <div class="progress-bar">
+                    <div class="progress-fill" id="progressFill"></div>
+                </div>
+                <div style="text-align: center; margin-top: 10px;">
+                    <span id="progressText">Processing...</span>
+                </div>
+            </div>
+
+            <div class="status-message" id="statusMessage"></div>
+
+            <div class="stats-grid" id="statsGrid" style="display: none;">
+                <div class="stat-card">
+                    <div class="stat-number" id="totalFiles">0</div>
+                    <div class="stat-label">Total Files</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number" id="successfulFiles">0</div>
+                    <div class="stat-label">Successful</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number" id="failedFiles">0</div>
+                    <div class="stat-label">Failed</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number" id="processingTime">0s</div>
+                    <div class="stat-label">Processing Time</div>
+                </div>
+            </div>
+
+            <div class="download-section" id="downloadSection">
+                <h3>✅ Processing Complete!</h3>
+                <p>Your Excel file is ready for download</p>
+                <br>
+                <button class="btn download-btn" id="downloadBtn">
+                    📊 Download Excel Results
+                </button>
+            </div>
+        </div>
+
+        <div class="footer">
+            <p>Crew Feedback Parser v2.0 | Secure API key handling | Processes crew feedback forms and extracts structured data</p>
+        </div>
+    </div>
+
+    <script>
+        let selectedFiles = [];
+        let downloadUrl = null;
+        let apiKey = null;
+
+        // Check if API key exists in session storage on page load
+        window.addEventListener('load', function() {
+            const storedApiKey = sessionStorage.getItem('openai_api_key');
+            if (storedApiKey) {
+                apiKey = storedApiKey;
+                showMainContent();
+            }
+        });
+
+        // API Key validation
+        async function validateApiKey() {
+            const apiKeyInput = document.getElementById('apiKeyInput');
+            const key = apiKeyInput.value.trim();
+            
+            if (!key) {
+                showMessage('Please enter your OpenAI API key', 'error');
+                return;
+            }
+
+            if (!key.startsWith('sk-')) {
+                showMessage('Invalid API key format. OpenAI keys start with "sk-"', 'error');
+                return;
+            }
+
+            // Show loading state
+            const validateBtn = document.getElementById('validateBtnText');
+            const validateSpinner = document.getElementById('validateSpinner');
+            validateBtn.textContent = 'Validating...';
+            validateSpinner.style.display = 'inline-block';
+
+            try {
+                // Test the API key
+                const response = await fetch('/validate-api-key', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ api_key: key })
+                });
+
+                const result = await response.json();
+
+                if (result.valid) {
+                    apiKey = key;
+                    sessionStorage.setItem('openai_api_key', key);
+                    showMessage('API key validated successfully!', 'success');
+                    setTimeout(() => {
+                        showMainContent();
+                    }, 1000);
+                } else {
+                    showMessage(result.error || 'Invalid API key. Please check and try again.', 'error');
+                }
+            } catch (error) {
+                showMessage('Failed to validate API key: ' + error.message, 'error');
+            } finally {
+                validateBtn.textContent = 'Connect & Validate';
+                validateSpinner.style.display = 'none';
+            }
+        }
+
+        function showMainContent() {
+            document.getElementById('apiSetup').style.display = 'none';
+            document.getElementById('mainContent').style.display = 'block';
+            initializeFileHandling();
+        }
+
+        function disconnectApi() {
+            apiKey = null;
+            sessionStorage.removeItem('openai_api_key');
+            document.getElementById('apiSetup').style.display = 'block';
+            document.getElementById('mainContent').style.display = 'none';
+            document.getElementById('apiKeyInput').value = '';
+            clearFiles();
+            hideMessage();
+        }
+
+        // File handling functions
+        function initializeFileHandling() {
+            const uploadArea = document.getElementById('uploadArea');
+            const fileInput = document.getElementById('fileInput');
+
+            uploadArea.addEventListener('click', () => fileInput.click());
+            uploadArea.addEventListener('dragover', handleDragOver);
+            uploadArea.addEventListener('dragleave', handleDragLeave);
+            uploadArea.addEventListener('drop', handleDrop);
+            fileInput.addEventListener('change', handleFileSelect);
+
+            updateUploadButton();
+        }
+
+        function handleDragOver(e) {
+            e.preventDefault();
+            document.getElementById('uploadArea').classList.add('dragover');
+        }
+
+        function handleDragLeave(e) {
+            e.preventDefault();
+            document.getElementById('uploadArea').classList.remove('dragover');
+        }
+
+        function handleDrop(e) {
+            e.preventDefault();
+            document.getElementById('uploadArea').classList.remove('dragover');
+            const files = Array.from(e.dataTransfer.files);
+            addFiles(files);
+        }
+
+        function handleFileSelect(e) {
+            const files = Array.from(e.target.files);
+            addFiles(files);
+        }
+
+        function addFiles(files) {
+            const allowedTypes = ['application/pdf', 'image/png', 'image/jpeg', 'image/tiff'];
+            const maxSize = 50 * 1024 * 1024; // 50MB
+
+            files.forEach(file => {
+                if (!allowedTypes.includes(file.type)) {
+                    showMessage(`File ${file.name} is not a supported format`, 'error');
+                    return;
+                }
+
+                if (file.size > maxSize) {
+                    showMessage(`File ${file.name} is too large (max 50MB)`, 'error');
+                    return;
+                }
+
+                if (selectedFiles.find(f => f.name === file.name && f.size === file.size)) {
+                    showMessage(`File ${file.name} is already selected`, 'error');
+                    return;
+                }
+
+                selectedFiles.push(file);
+            });
+
+            updateFileList();
+            updateUploadButton();
+        }
+
+        function updateFileList() {
+            const fileList = document.getElementById('fileList');
+            const fileItems = document.getElementById('fileItems');
+
+            if (selectedFiles.length === 0) {
+                fileList.style.display = 'none';
+                return;
+            }
+
+            fileList.style.display = 'block';
+            fileItems.innerHTML = '';
+
+            selectedFiles.forEach((file, index) => {
+                const fileItem = document.createElement('div');
+                fileItem.className = 'file-item';
+                fileItem.innerHTML = `
+                    <div>
+                        <div class="file-name">${file.name}</div>
+                        <div class="file-size">${formatFileSize(file.size)}</div>
+                    </div>
+                    <button class="remove-file" onclick="removeFile(${index})">Remove</button>
+                `;
+                fileItems.appendChild(fileItem);
+            });
+        }
+
+        function removeFile(index) {
+            selectedFiles.splice(index, 1);
+            updateFileList();
+            updateUploadButton();
+        }
+
+        function clearFiles() {
+            selectedFiles = [];
+            const fileInput = document.getElementById('fileInput');
+            if (fileInput) fileInput.value = '';
+            updateFileList();
+            updateUploadButton();
+            hideMessage();
+            hideDownloadSection();
+        }
+
+        function updateUploadButton() {
+            const uploadBtn = document.getElementById('uploadBtn');
+            const uploadBtnText = document.getElementById('uploadBtnText');
+            
+            if (!uploadBtn || !uploadBtnText) return;
+
+            if (selectedFiles.length === 0) {
+                uploadBtn.disabled = true;
+                uploadBtnText.textContent = 'Select Files First';
+            } else {
+                uploadBtn.disabled = false;
+                uploadBtnText.textContent = `Process ${selectedFiles.length} File${selectedFiles.length > 1 ? 's' : ''}`;
+            }
+        }
+
+        function formatFileSize(bytes) {
+            if (bytes === 0) return '0 Bytes';
+            const k = 1024;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        }
+
+        function uploadFiles() {
+            if (selectedFiles.length === 0 || !apiKey) return;
+
+            const formData = new FormData();
+            selectedFiles.forEach(file => {
+                formData.append('files', file);
+            });
+
+            // Show progress
+            showProgress();
+            const uploadBtn = document.getElementById('uploadBtn');
+            const uploadBtnText = document.getElementById('uploadBtnText');
+            const uploadSpinner = document.getElementById('uploadSpinner');
+            
+            uploadBtn.disabled = true;
+            uploadBtnText.textContent = 'Processing...';
+            uploadSpinner.style.display = 'inline-block';
+
+            fetch('/upload', {
+                method: 'POST',
+                headers: {
+                    'X-API-Key': apiKey
+                },
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                hideProgress();
+                
+                if (data.success) {
+                    showMessage('Files processed successfully!', 'success');
+                    showStats(data.stats);
+                    showDownloadSection(data.download_url);
+                } else {
+                    showMessage(data.error || 'Processing failed', 'error');
+                }
+            })
+            .catch(error => {
+                hideProgress();
+                showMessage('Upload failed: ' + error.message, 'error');
+            })
+            .finally(() => {
+                uploadBtn.disabled = false;
+                uploadBtnText.textContent = `Process ${selectedFiles.length} File${selectedFiles.length > 1 ? 's' : ''}`;
+                uploadSpinner.style.display = 'none';
+            });
+        }
+
+        function showProgress() {
+            document.getElementById('progressContainer').style.display = 'block';
+            let progress = 0;
+            const interval = setInterval(() => {
+                progress += Math.random() * 15;
+                if (progress > 90) progress = 90;
+                document.getElementById('progressFill').style.width = progress + '%';
+            }, 500);
+            
+            window.progressInterval = interval;
+        }
+
+        function hideProgress() {
+            document.getElementById('progressContainer').style.display = 'none';
+            document.getElementById('progressFill').style.width = '0%';
+            if (window.progressInterval) {
+                clearInterval(window.progressInterval);
+            }
+        }
+
+        function showMessage(message, type) {
+            const statusMessage = document.getElementById('statusMessage');
+            statusMessage.textContent = message;
+            statusMessage.className = `status-message status-${type}`;
+            statusMessage.style.display = 'block';
+        }
+
+        function hideMessage() {
+            const statusMessage = document.getElementById('statusMessage');
+            if (statusMessage) statusMessage.style.display = 'none';
+        }
+
+        function showStats(stats) {
+            document.getElementById('totalFiles').textContent = stats.total_files;
+            document.getElementById('successfulFiles').textContent = stats.successful;
+            document.getElementById('failedFiles').textContent = stats.failed;
+            document.getElementById('processingTime').textContent = stats.processing_time;
+            document.getElementById('statsGrid').style.display = 'grid';
+        }
+
+        function showDownloadSection(url) {
+            downloadUrl = url;
+            document.getElementById('downloadBtn').onclick = () => window.location.href = url;
+            document.getElementById('downloadSection').style.display = 'block';
+        }
+
+        function hideDownloadSection() {
+            const downloadSection = document.getElementById('downloadSection');
+            const statsGrid = document.getElementById('statsGrid');
+            if (downloadSection) downloadSection.style.display = 'none';
+            if (statsGrid) statsGrid.style.display = 'none';
+        }
+
+        // Handle Enter key in API key input
+        document.addEventListener('DOMContentLoaded', function() {
+            const apiKeyInput = document.getElementById('apiKeyInput');
+            if (apiKeyInput) {
+                apiKeyInput.addEventListener('keypress', function(e) {
+                    if (e.key === 'Enter') {
+                        validateApiKey();
+                    }
+                });
+            }
+        });
+    </script>
+</body>
+</html>
