@@ -40,6 +40,8 @@ def allowed_file(filename):
     return '.' in filename and \
            filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
+
+
 def validate_openai_key(api_key):
     """Validate OpenAI API key by making a test request"""
     try:
@@ -160,35 +162,75 @@ def upload_files():
         os.environ['OPENAI_API_KEY'] = api_key
         
         try:
-            processor = BatchProcessor()
+            # Initialize config manager for the processor
+            from crew_feedback_parser.config.config_manager import ConfigManager
+            config_manager = ConfigManager()
+            
+            processor = BatchProcessor(config_manager)
             start_time = datetime.now()
             
-            # Process the files
-            results = processor.process_files(saved_files, session_output_folder)
+            # Process the files individually and collect results
+            results = []
+            output_excel_file = os.path.join(session_output_folder, f"crew_feedback_results_{session_id}.xlsx")
+            
+            # Initialize Excel writer
+            from crew_feedback_parser.services.excel_writer import ExcelWriter
+            excel_writer = ExcelWriter(output_excel_file)
+            excel_writer.create_or_load_workbook()
+            
+            # Process each file and handle multiple feedbacks
+            for file_path in saved_files:
+                try:
+                    # Process the file - this now returns a list of results (one per feedback)
+                    file_results = processor._process_single_file_multiple(Path(file_path))
+                    
+                    # Add all results from this file
+                    results.extend(file_results)
+                    
+                    # Write each result to Excel
+                    for individual_result in file_results:
+                        excel_writer.append_feedback_and_log(individual_result)
+                    
+                    logger.info(f"Processed {file_path}: {len(file_results)} feedback(s) extracted")
+                    
+                except Exception as e:
+                    logger.error(f"Error processing {file_path}: {e}")
+                    # Create error result
+                    from crew_feedback_parser.models.feedback_data import ProcessingResult
+                    error_result = ProcessingResult(
+                        file_name=Path(file_path).name,
+                        status="error",
+                        error_message=str(e)
+                    )
+                    results.append(error_result)
+                    excel_writer.append_feedback_and_log(error_result)
+            
+            # Save Excel file
+            excel_writer.save_workbook()
+            excel_writer.close_workbook()
             
             processing_time = (datetime.now() - start_time).total_seconds()
             
             # Generate statistics
             total_files = len(saved_files)
-            successful_files = len([r for r in results if r.get('success', False)])
-            failed_files = total_files - successful_files
+            successful_files = len([r for r in results if r.status == "pass"])
+            failed_files = len([r for r in results if r.status == "fail"])
+            error_files = len([r for r in results if r.status == "error"])
             
-            # Find the output Excel file
-            excel_files = list(Path(session_output_folder).glob('*.xlsx'))
-            if excel_files:
-                output_file = excel_files[0]
-                download_url = f'/download/{session_id}/{output_file.name}'
+            # Check if Excel file was created
+            if os.path.exists(output_excel_file):
+                download_url = f'/download/{session_id}/{Path(output_excel_file).name}'
                 
-                logger.info(f"Processing complete: {successful_files}/{total_files} files successful")
+                logger.info(f"Processing complete: {successful_files}/{total_files} files successful, {failed_files} failed, {error_files} errors")
                 
                 return jsonify({
                     'success': True,
-                    'message': f'Processed {successful_files} out of {total_files} files',
+                    'message': f'Processed {successful_files} out of {total_files} files successfully',
                     'download_url': download_url,
                     'stats': {
                         'total_files': total_files,
                         'successful': successful_files,
-                        'failed': failed_files,
+                        'failed': failed_files + error_files,
                         'processing_time': f"{processing_time:.1f}s"
                     }
                 })
@@ -225,7 +267,7 @@ def download_file(session_id, filename):
         if not os.path.exists(file_path):
             return jsonify({'error': 'File not found'}), 404
         
-        # Clean up the session folder after download
+        # Schedule cleanup after file download (delayed)
         def cleanup_session():
             try:
                 session_folder = os.path.join(OUTPUT_FOLDER, session_id)
@@ -234,14 +276,9 @@ def download_file(session_id, filename):
             except Exception as e:
                 logger.warning(f"Failed to clean up session folder {session_id}: {e}")
         
-        # Schedule cleanup after sending file
-        @app.after_request
-        def after_download(response):
-            if request.endpoint == 'download_file':
-                # Delay cleanup to ensure file is sent
-                import threading
-                threading.Timer(5.0, cleanup_session).start()
-            return response
+        # Schedule cleanup in 10 seconds to allow download to complete
+        import threading
+        threading.Timer(10.0, cleanup_session).start()
         
         return send_file(
             file_path,
@@ -293,4 +330,4 @@ if __name__ == '__main__':
     app.config['MAX_CONTENT_LENGTH'] = MAX_FILE_SIZE
     
     # Run the application
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    app.run(debug=True, host='0.0.0.0', port=5001)

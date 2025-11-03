@@ -297,6 +297,8 @@ class BatchProcessor:
     def _process_single_file(self, file_path: Path) -> ProcessingResult:
         """
         Process a single feedback form file with comprehensive error handling.
+        Note: This method returns only the first feedback if multiple are found.
+        Use _process_single_file_multiple() for handling multiple feedbacks.
         
         Args:
             file_path: Path to file to process
@@ -304,20 +306,37 @@ class BatchProcessor:
         Returns:
             ProcessingResult with processing status and data
         """
+        results = self._process_single_file_multiple(file_path)
+        return results[0] if results else ProcessingResult(
+            file_name=file_path.name,
+            status="error",
+            error_message="No results generated"
+        )
+
+    def _process_single_file_multiple(self, file_path: Path) -> List[ProcessingResult]:
+        """
+        Process a single feedback form file and return all feedbacks found.
+        
+        Args:
+            file_path: Path to file to process
+            
+        Returns:
+            List of ProcessingResult objects (one per feedback found)
+        """
         file_name = file_path.name
         self.logger.debug(f"Processing file: {file_name}")
         
         try:
-            # Step 1: Parse document using LlamaIndex API
+            # Step 1: Parse document using OpenAI API
             self.logger.debug(f"Parsing document: {file_name}")
             parse_result = self.document_client.parse_document(str(file_path))
             
             if not parse_result.get('text'):
-                return ProcessingResult(
+                return [ProcessingResult(
                     file_name=file_name,
                     status="fail",
                     error_message="No text extracted from document"
-                )
+                )]
             
             # Step 2: Extract structured data
             self.logger.debug(f"Extracting data from: {file_name}")
@@ -326,44 +345,18 @@ class BatchProcessor:
             structured_data = parse_result.get('structured_data')
             if structured_data:
                 self.logger.info(f"Using OpenAI structured JSON data for {file_name}")
-                extraction_result = self._create_extraction_result_from_json(structured_data, file_name)
+                
+                # Check if multiple feedbacks were detected
+                if structured_data.get('form_type') == 'multiple':
+                    return self._create_multiple_processing_results(structured_data, file_name)
+                else:
+                    # Single feedback
+                    extraction_result = self._create_single_feedback_result(structured_data, file_name)
+                    return [self._create_processing_result_from_extraction(extraction_result, file_name)]
             else:
                 # Fall back to pattern matching
                 extraction_result = self.data_extractor.extract_complete_data(parse_result['text'], file_name)
-            
-            if not extraction_result.data:
-                return ProcessingResult(
-                    file_name=file_name,
-                    status="fail",
-                    error_message="Failed to extract structured data from text"
-                )
-            
-            # Step 3: Validate extraction quality
-            if self.data_extractor.flag_for_manual_review(extraction_result):
-                status = "fail"
-                error_message = (f"Low quality extraction (confidence: {extraction_result.confidence_score:.2f}, "
-                               f"missing: {len(extraction_result.missing_fields)} fields) - manual review required")
-                
-                # Log detailed extraction issues for debugging
-                self.logger.warning(f"Quality issues for {file_name}: "
-                                  f"confidence={extraction_result.confidence_score:.2f}, "
-                                  f"missing_fields={extraction_result.missing_fields}, "
-                                  f"notes={extraction_result.extraction_notes}")
-            else:
-                status = "pass"
-                error_message = None
-                
-                # Log successful extraction details
-                self.logger.debug(f"Successful extraction for {file_name}: "
-                                f"confidence={extraction_result.confidence_score:.2f}, "
-                                f"missing_fields={len(extraction_result.missing_fields)}")
-            
-            return ProcessingResult(
-                file_name=file_name,
-                status=status,
-                error_message=error_message,
-                data=extraction_result.data
-            )
+                return [self._create_processing_result_from_extraction(extraction_result, file_name)]
             
         except LlamaIndexAPIError as e:
             # Handle API errors with comprehensive error handling
@@ -392,6 +385,7 @@ class BatchProcessor:
     def _create_extraction_result_from_json(self, structured_data: Dict[str, Any], file_name: str) -> 'ExtractionResult':
         """
         Create ExtractionResult from OpenAI structured JSON data.
+        Handles both single and multiple feedback forms.
         
         Args:
             structured_data: JSON data from OpenAI
@@ -400,6 +394,18 @@ class BatchProcessor:
         Returns:
             ExtractionResult with high confidence
         """
+        from ..models.feedback_data import FeedbackData
+        from ..services.data_extractor import ExtractionResult
+        
+        # Check if this contains multiple feedbacks
+        if structured_data.get('form_type') == 'multiple':
+            return self._create_multiple_feedback_result(structured_data, file_name)
+        
+        # Handle single feedback (existing logic)
+        return self._create_single_feedback_result(structured_data, file_name)
+
+    def _create_single_feedback_result(self, structured_data: Dict[str, Any], file_name: str) -> 'ExtractionResult':
+        """Create ExtractionResult for a single feedback form."""
         from ..models.feedback_data import FeedbackData
         from ..services.data_extractor import ExtractionResult
         
@@ -424,7 +430,7 @@ class BatchProcessor:
         # Count missing fields
         missing_fields = []
         for field_name, field_value in structured_data.items():
-            if field_value is None and field_name != 'additional_comments':
+            if field_value is None and field_name not in ['additional_comments', 'form_type']:
                 missing_fields.append(field_name)
         
         # Calculate confidence (high for OpenAI JSON, reduced by missing fields)
@@ -432,13 +438,170 @@ class BatchProcessor:
         confidence_penalty = len(missing_fields) * 0.05
         confidence_score = max(0.5, base_confidence - confidence_penalty)
         
-        self.logger.info(f"OpenAI JSON extraction - Confidence: {confidence_score:.2f}, Missing: {len(missing_fields)} fields")
+        # Check for handwriting indicators
+        extraction_notes = [f"Extracted using OpenAI structured JSON for {file_name}"]
+        if any("illegible_handwriting" in str(v) for v in structured_data.values()):
+            extraction_notes.append("Contains illegible handwritten text")
+            confidence_score *= 0.9  # Reduce confidence for illegible handwriting
+        if any("[unclear]" in str(v) for v in structured_data.values()):
+            extraction_notes.append("Contains unclear handwritten text")
+            confidence_score *= 0.95  # Slight confidence reduction for unclear text
+        
+        self.logger.info(f"Single feedback extraction - Confidence: {confidence_score:.2f}, Missing: {len(missing_fields)} fields")
         
         return ExtractionResult(
             data=feedback_data,
             confidence_score=confidence_score,
             missing_fields=missing_fields,
-            extraction_notes=[f"Extracted using OpenAI structured JSON for {file_name}"]
+            extraction_notes=extraction_notes
+        )
+
+    def _create_multiple_feedback_result(self, structured_data: Dict[str, Any], file_name: str) -> 'ExtractionResult':
+        """
+        Create ExtractionResult for multiple feedback forms.
+        Returns the first valid feedback but logs all found feedbacks.
+        """
+        from ..models.feedback_data import FeedbackData
+        from ..services.data_extractor import ExtractionResult
+        
+        feedbacks = structured_data.get('feedbacks', [])
+        total_feedbacks = len(feedbacks)
+        
+        self.logger.info(f"MULTIPLE FEEDBACKS DETECTED: {total_feedbacks} forms in {file_name}")
+        
+        if not feedbacks:
+            return ExtractionResult(
+                data=None,
+                confidence_score=0.0,
+                missing_fields=['all'],
+                extraction_notes=[f"Multiple feedback structure detected but no feedbacks found in {file_name}"]
+            )
+        
+        # Process the first feedback as the primary result
+        primary_feedback = feedbacks[0]
+        primary_result = self._create_single_feedback_result(primary_feedback, f"{file_name} (Feedback 1/{total_feedbacks})")
+        
+        # Log information about all feedbacks
+        extraction_notes = [
+            f"MULTIPLE FEEDBACKS: {total_feedbacks} forms detected in {file_name}",
+            f"Primary result from first feedback (Crew: {primary_feedback.get('crew_name', 'Unknown')})"
+        ]
+        
+        # Add notes about other feedbacks
+        for i, feedback in enumerate(feedbacks[1:], 2):
+            crew_name = feedback.get('crew_name', 'Unknown')
+            vessel = feedback.get('vessel', 'Unknown')
+            extraction_notes.append(f"Additional feedback {i}: {crew_name} from {vessel}")
+        
+        # Store all feedbacks in the extraction notes for manual review
+        extraction_notes.append("MANUAL REVIEW RECOMMENDED: Multiple feedbacks should be processed separately")
+        
+        # Adjust confidence for multiple feedbacks
+        confidence_score = primary_result.confidence_score * 0.8  # Reduce confidence to flag for review
+        
+        # Update the primary result with multiple feedback information
+        primary_result.extraction_notes.extend(extraction_notes)
+        primary_result.confidence_score = confidence_score
+        
+        self.logger.warning(f"Multiple feedbacks in {file_name} - using first feedback as primary result, manual review recommended")
+        
+        return primary_result
+
+    def _create_multiple_processing_results(self, structured_data: Dict[str, Any], file_name: str) -> List[ProcessingResult]:
+        """
+        Create multiple ProcessingResults from multiple feedback data.
+        
+        Args:
+            structured_data: JSON data containing multiple feedbacks
+            file_name: Source filename
+            
+        Returns:
+            List of ProcessingResult objects, one per feedback
+        """
+        feedbacks = structured_data.get('feedbacks', [])
+        total_feedbacks = len(feedbacks)
+        
+        if not feedbacks:
+            return [ProcessingResult(
+                file_name=file_name,
+                status="fail",
+                error_message="Multiple feedback structure detected but no feedbacks found"
+            )]
+        
+        results = []
+        self.logger.info(f"Creating {total_feedbacks} separate results for {file_name}")
+        
+        for i, feedback_data in enumerate(feedbacks, 1):
+            try:
+                # Create individual filename with crew name if available
+                crew_name = feedback_data.get('crew_name', f'Feedback_{i}')
+                individual_filename = f"{file_name} ({crew_name})"
+                
+                # Create extraction result for this feedback
+                extraction_result = self._create_single_feedback_result(feedback_data, individual_filename)
+                
+                # Create processing result
+                processing_result = self._create_processing_result_from_extraction(extraction_result, individual_filename)
+                results.append(processing_result)
+                
+                self.logger.info(f"Created result {i}/{total_feedbacks}: {individual_filename}")
+                
+            except Exception as e:
+                self.logger.error(f"Error processing feedback {i} from {file_name}: {e}")
+                # Create error result for this feedback
+                error_result = ProcessingResult(
+                    file_name=f"{file_name} (Feedback_{i}_ERROR)",
+                    status="error",
+                    error_message=f"Error processing individual feedback: {e}"
+                )
+                results.append(error_result)
+        
+        self.logger.info(f"Successfully created {len(results)} results from {file_name}")
+        return results
+
+    def _create_processing_result_from_extraction(self, extraction_result, file_name: str) -> ProcessingResult:
+        """
+        Create ProcessingResult from ExtractionResult.
+        
+        Args:
+            extraction_result: ExtractionResult object
+            file_name: Source filename
+            
+        Returns:
+            ProcessingResult object
+        """
+        if not extraction_result.data:
+            return ProcessingResult(
+                file_name=file_name,
+                status="fail",
+                error_message="Failed to extract structured data from text"
+            )
+        
+        # Step 3: Validate extraction quality
+        if self.data_extractor.flag_for_manual_review(extraction_result):
+            status = "fail"
+            error_message = (f"Low quality extraction (confidence: {extraction_result.confidence_score:.2f}, "
+                           f"missing: {len(extraction_result.missing_fields)} fields) - manual review required")
+            
+            # Log detailed extraction issues for debugging
+            self.logger.warning(f"Quality issues for {file_name}: "
+                              f"confidence={extraction_result.confidence_score:.2f}, "
+                              f"missing_fields={extraction_result.missing_fields}, "
+                              f"notes={extraction_result.extraction_notes}")
+        else:
+            status = "pass"
+            error_message = None
+            
+            # Log successful extraction details
+            self.logger.debug(f"Successful extraction for {file_name}: "
+                            f"confidence={extraction_result.confidence_score:.2f}, "
+                            f"missing_fields={len(extraction_result.missing_fields)}")
+        
+        return ProcessingResult(
+            file_name=file_name,
+            status=status,
+            error_message=error_message,
+            data=extraction_result.data
         )
 
     def _reset_stats(self) -> None:

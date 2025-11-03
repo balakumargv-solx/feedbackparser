@@ -43,14 +43,14 @@ def main():
     print("• Automatic file cleanup after processing")
     
     print("\n🌐 Starting web server...")
-    print("Access the application at: http://localhost:5000")
+    print("Access the application at: http://localhost:5001")
     print("Press Ctrl+C to stop the server")
     print("-" * 50)
     
     try:
         # Import and run the secure web UI
         from secure_web_ui import app
-        app.run(debug=False, host='0.0.0.0', port=5000)
+        app.run(debug=False, host='0.0.0.0', port=5001)
     except KeyboardInterrupt:
         print("\n\n👋 Server stopped by user")
     except Exception as e:

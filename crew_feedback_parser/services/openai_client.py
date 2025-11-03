@@ -46,9 +46,9 @@ class OpenAIClient:
         
         # API configuration
         self.base_url = "https://api.openai.com/v1"
-        self.model = "gpt-4o"  # GPT-4 with vision capabilities
+        self.model = "gpt-4o"  # Latest GPT-4 with enhanced vision capabilities
         self.max_tokens = 4000
-        self.temperature = 0.1  # Low temperature for consistent extraction
+        self.temperature = 0.05  # Very low temperature for consistent extraction of handwritten text
         
         self.logger.info("OpenAI API client initialized successfully")
 
@@ -102,16 +102,8 @@ class OpenAIClient:
                     # Fallback to text format
                     all_data.append({"raw_text": json_response})
             
-            # Combine data from all pages (for multi-page forms)
-            if len(all_data) == 1:
-                combined_data = all_data[0]
-            else:
-                # Merge data from multiple pages, preferring non-null values
-                combined_data = {}
-                for page_data in all_data:
-                    for key, value in page_data.items():
-                        if value is not None and (key not in combined_data or combined_data[key] is None):
-                            combined_data[key] = value
+            # Combine data from all pages - handle multiple feedbacks intelligently
+            combined_data = self._combine_page_data(all_data, file_path.name)
             
             # Convert structured data back to text format for compatibility
             combined_text = self._convert_json_to_text(combined_data)
@@ -162,8 +154,8 @@ class OpenAIClient:
             for page_num in range(len(doc)):
                 page = doc.load_page(page_num)
                 
-                # Render page to image with high DPI for better OCR
-                mat = fitz.Matrix(2.0, 2.0)  # 2x zoom for better quality
+                # Render page to image with very high DPI for better handwriting recognition
+                mat = fitz.Matrix(3.0, 3.0)  # 3x zoom for better handwriting recognition
                 pix = page.get_pixmap(matrix=mat)
                 
                 # Save as temporary image
@@ -205,13 +197,20 @@ class OpenAIClient:
         Returns:
             JSON string with structured data
         """
-        # Specialized prompt for crew feedback forms - requesting JSON output
-        system_prompt = """You are an expert at extracting structured data from crew feedback survey forms. 
+        # Enhanced prompt for crew feedback forms - handles multiple feedbacks and handwritten text
+        system_prompt = """You are an expert at extracting structured data from crew feedback survey forms. You can handle:
+        1. Multiple feedback forms in a single document
+        2. Handwritten text and forms
+        3. Mixed printed and handwritten content
+        4. Partially filled or unclear forms
         
-        You must return a JSON object with the following structure:
+        IMPORTANT: If you detect MULTIPLE feedback forms in the same document, return an array of JSON objects.
+        If there's only ONE feedback form, return a single JSON object.
+        
+        For SINGLE feedback form, use this structure:
         {
             "vessel": "vessel name",
-            "crew_name": "full crew member name",
+            "crew_name": "full crew member name", 
             "crew_rank": "crew rank/position",
             "safer_with_sos": rating_number,
             "fatigue_monitoring_prevention": rating_number,
@@ -224,26 +223,57 @@ class OpenAIClient:
             "activity_tracking_awareness": rating_number,
             "fall_detection_confidence": rating_number,
             "feature_preference": "text description of preferred features",
-            "additional_comments": "any other comments or feedback"
+            "additional_comments": "any other comments or feedback",
+            "form_type": "single"
+        }
+        
+        For MULTIPLE feedback forms, return:
+        {
+            "form_type": "multiple",
+            "feedbacks": [
+                {feedback_object_1},
+                {feedback_object_2},
+                ...
+            ]
         }
         
         For ratings, use numbers 1-5 where:
         1 = Strongly Disagree, 2 = Disagree, 3 = Neutral, 4 = Agree, 5 = Strongly Agree
         
+        For handwritten text:
+        - Do your best to read unclear handwriting
+        - If text is completely illegible, use "illegible_handwriting" as the value
+        - If partially readable, include what you can read with [unclear] for uncertain parts
+        
         If a field is not found or unclear, use null for that field.
         Return ONLY valid JSON, no other text."""
         
-        user_prompt = f"""Extract structured data from this crew feedback survey form (page {page_num} of {filename}) and return it as JSON.
+        user_prompt = f"""Analyze this crew feedback survey form (page {page_num} of {filename}) and extract structured data as JSON.
 
-Look for:
-1. Vessel name (usually at the top)
-2. Crew member's full name
-3. Crew rank/position (like "2nd Officer", "Captain", etc.)
-4. Survey ratings (look for checked boxes ☑ or selected numbers 1-5)
+CRITICAL: First determine if this document contains:
+- ONE feedback form → return single JSON object with "form_type": "single"
+- MULTIPLE feedback forms → return JSON with "form_type": "multiple" and "feedbacks" array
+
+For each feedback form, look for:
+1. Vessel name (usually at the top of each form)
+2. Crew member's full name (may be handwritten)
+3. Crew rank/position (like "2nd Officer", "Captain", "Able Seaman", etc.)
+4. Survey ratings (look for checked boxes ☑, circled numbers, or written numbers 1-5)
 5. Feature preferences (which SOL-X features are most valuable)
-6. Any additional comments
+6. Any additional comments (may be handwritten)
 
-Map the survey questions to these fields:
+HANDWRITING HANDLING:
+- Read handwritten text carefully, even if messy
+- For unclear handwriting, include what you can read + [unclear] for uncertain parts
+- If completely illegible, use "illegible_handwriting"
+- Look for common handwriting patterns in names and comments
+
+RATING DETECTION:
+- Look for checked boxes, circled numbers, highlighted options
+- Check for handwritten numbers or marks next to questions
+- If rating method is unclear, note the marking style in additional_comments
+
+Map survey questions to these fields:
 - "safer_with_sos": SOS/Crew Assist safety question
 - "fatigue_monitoring_prevention": Fatigue monitoring question  
 - "geofence_awareness": Geofence/boundary awareness question
@@ -255,7 +285,7 @@ Map the survey questions to these fields:
 - "activity_tracking_awareness": Step count/activity tracking question
 - "fall_detection_confidence": Fall detection safety question
 
-Return ONLY the JSON object, no other text."""
+Return ONLY the JSON object/array, no other text."""
         
         headers = {
             "Content-Type": "application/json",
@@ -313,9 +343,68 @@ Return ONLY the JSON object, no other text."""
         except requests.exceptions.RequestException as e:
             raise OpenAIAPIError(f"Request failed: {e}")
 
+    def _combine_page_data(self, all_data: list, filename: str) -> Dict[str, Any]:
+        """
+        Intelligently combine data from multiple pages, handling multiple feedbacks.
+        
+        Args:
+            all_data: List of parsed data from each page
+            filename: Original filename for logging
+            
+        Returns:
+            Combined data structure
+        """
+        if len(all_data) == 1:
+            return all_data[0]
+        
+        # Check if any page contains multiple feedbacks
+        multiple_feedbacks = []
+        single_feedbacks = []
+        
+        for page_data in all_data:
+            if isinstance(page_data, dict):
+                if page_data.get('form_type') == 'multiple':
+                    # Extract individual feedbacks from multiple feedback pages
+                    feedbacks = page_data.get('feedbacks', [])
+                    multiple_feedbacks.extend(feedbacks)
+                    self.logger.info(f"Found {len(feedbacks)} multiple feedbacks on page in {filename}")
+                elif page_data.get('form_type') == 'single' or 'crew_name' in page_data:
+                    # Single feedback form
+                    single_feedbacks.append(page_data)
+                else:
+                    # Raw text or other format
+                    single_feedbacks.append(page_data)
+        
+        # Combine all feedbacks
+        all_feedbacks = multiple_feedbacks + single_feedbacks
+        
+        if len(all_feedbacks) > 1:
+            self.logger.info(f"Combined {len(all_feedbacks)} total feedbacks from {filename}")
+            return {
+                'form_type': 'multiple',
+                'feedbacks': all_feedbacks,
+                'total_feedbacks': len(all_feedbacks)
+            }
+        elif len(all_feedbacks) == 1:
+            # Single feedback, but mark it as processed from multi-page
+            feedback = all_feedbacks[0]
+            feedback['form_type'] = 'single'
+            return feedback
+        else:
+            # Fallback: merge pages traditionally
+            self.logger.warning(f"No clear feedback structure found in {filename}, using traditional merge")
+            combined_data = {}
+            for page_data in all_data:
+                if isinstance(page_data, dict):
+                    for key, value in page_data.items():
+                        if value is not None and (key not in combined_data or combined_data[key] is None):
+                            combined_data[key] = value
+            return combined_data
+
     def _convert_json_to_text(self, data: Dict[str, Any]) -> str:
         """
         Convert structured JSON data back to text format for compatibility.
+        Handles both single and multiple feedback forms.
         
         Args:
             data: Structured data dictionary
@@ -326,7 +415,32 @@ Return ONLY the JSON object, no other text."""
         if 'raw_text' in data:
             return data['raw_text']
         
-        # Convert structured data to readable text format
+        # Handle multiple feedbacks
+        if data.get('form_type') == 'multiple':
+            text_parts = [f"MULTIPLE FEEDBACKS DETECTED ({data.get('total_feedbacks', 0)} forms)"]
+            text_parts.append("=" * 60)
+            
+            feedbacks = data.get('feedbacks', [])
+            for i, feedback in enumerate(feedbacks, 1):
+                text_parts.append(f"\n--- FEEDBACK {i} ---")
+                text_parts.append(self._convert_single_feedback_to_text(feedback))
+                text_parts.append("-" * 40)
+            
+            return '\n'.join(text_parts)
+        
+        # Handle single feedback
+        return self._convert_single_feedback_to_text(data)
+
+    def _convert_single_feedback_to_text(self, data: Dict[str, Any]) -> str:
+        """
+        Convert a single feedback form to text format.
+        
+        Args:
+            data: Single feedback data dictionary
+            
+        Returns:
+            Text representation of the single feedback
+        """
         text_parts = []
         
         # Basic info
